@@ -1,64 +1,52 @@
 from flask import Flask, request
 import requests
+import os
 
 app = Flask(__name__)
 
+# Fixed Verify Token
 VERIFY_TOKEN = "botbela_verify_token"
+
+# Your Page Access Token (from Facebook)
 PAGE_ACCESS_TOKEN = "EAAPVY60zAeIBPWVha8QDduxZCdJ5mDkCn7v6GF7ttj82u3tOA6FGvxcR5Rf6HQYKXRqWVmhAUKXCHbOc0gdHYaAHSRKZAA93aCoWGz8hq4YnnD1vLEjwpwtVFZCFM0IdvedgVDAH6kmTl1KR9AWOKhVJPDRxIRKsSFgNvuZCwZBTnvQpSiT6gSsjGZCjuNkpULXlMb5wZDZD"
 
-user_limits = {}
+GRAPH_API = "https://graph.facebook.com/v17.0/me/messages"
 
-@app.route('/', methods=['GET'])
-def verify():
-    token_sent = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    if token_sent == VERIFY_TOKEN:
-        return str(challenge)
-    return 'Invalid verification token'
 
-@app.route('/', methods=['POST'])
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    data = request.get_json()
-    if data['object'] == 'page':
-        for entry in data['entry']:
-            for messaging_event in entry['messaging']:
-                if 'message' in messaging_event:
-                    sender_id = messaging_event['sender']['id']
-                    message_text = messaging_event['message'].get('text')
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            return challenge, 200
+        return "Verification failed", 403
 
-                    if not sender_id in user_limits:
-                        user_limits[sender_id] = {"count": 0}
+    if request.method == "POST":
+        data = request.get_json()
+        if data and data.get("object") == "page":
+            for entry in data.get("entry", []):
+                for ev in entry.get("messaging", []):
+                    if ev.get("message") and ev["message"].get("text"):
+                        sender = ev["sender"]["id"]
+                        text = ev["message"]["text"]
+                        reply = f"🤖 Botbela says: You said → {text}"
+                        send_message(sender, reply)
+        return "OK", 200
 
-                    if user_limits[sender_id]["count"] < 40:
-                        reply = funny_reply(message_text)
-                        send_message(sender_id, reply)
-                        user_limits[sender_id]["count"] += 1
-                    else:
-                        send_message(sender_id, "⚠️ আজকের limit (40) শেষ! কালকে আবার চেষ্টা করুন 🙂")
 
-    return "Message Processed"
-
-def funny_reply(msg):
-    if not msg:
-        return "😅 বলো কী খবর?"
-    text = msg.lower()
-    if "hi" in text or "hello" in text:
-        return "👋 হ্যালো! কেমন আছো?"
-    if "kemon" in text or "কেমন" in text:
-        return "😊 আমি ভালো, তুমি কেমন আছো?"
-    if "valo" in text:
-        return "👍 দারুন! শোনাও নতুন কী চলছে?"
-    return "😂 আহা! মজার কথা বলো, একটু হাসাই!"
-
-def send_message(recipient_id, message_text):
-    params = {"access_token": PAGE_ACCESS_TOKEN}
-    headers = {"Content-Type": "application/json"}
-    data = {
+def send_message(recipient_id, text):
+    payload = {
         "recipient": {"id": recipient_id},
-        "message": {"text": message_text}
+        "message": {"text": text}
     }
-    requests.post("https://graph.facebook.com/v13.0/me/messages",
-                  params=params, headers=headers, json=data)
+    params = {"access_token": PAGE_ACCESS_TOKEN}
+    r = requests.post(GRAPH_API, params=params, json=payload)
+    if r.status_code != 200:
+        print("Send error:", r.status_code, r.text)
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=10000)
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
